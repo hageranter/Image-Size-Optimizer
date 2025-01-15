@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Size Optimizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #2d3748;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        p {
+            text-align: center;
+            color: #4a5568;
+            margin-bottom: 1.5rem;
+        }
+
+        input[type="file"] {
+            display: block;
+            margin: 2rem auto;
+            padding: 1rem;
+            background: #fff;
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            width: 100%;
+            max-width: 400px;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+        }
+
+        input[type="file"]:hover {
+            border-color: #4299e1;
+        }
+
+        .image-preview {
+            margin-top: 2rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            justify-items: center;
+            padding: 1rem;
+        }
+
+        .image-container {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            width: 100%;
+            max-width: 320px;
+        }
+
+        .image-container:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .image-container img {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .file-info {
+            color: #4a5568;
+            font-size: 0.9rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        .download-btn {
+            background-color: #4299e1;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            display: block;
+            text-align: center;
+            font-weight: 500;
+            transition: background-color 0.2s ease;
+            width: 100%;
+        }
+
+        .download-btn:hover {
+            background-color: #3182ce;
+        }
+
+        .selected {
+            border: 3px solid #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.3);
+        }
+
+        #feedback {
+            text-align: center;
+            padding: 1rem;
+            margin: 1rem auto;
+            max-width: 600px;
+            border-radius: 8px;
+        }
+
+        #feedback:not(:empty) {
+            background-color: #ebf8ff;
+            border: 1px solid #bee3f8;
+            color: #2b6cb0;
+        }
+
+        #fileName {
+            font-weight: 500;
+            color: #2b6cb0;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 1rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .image-preview {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Image Size Optimizer</h1>
+    <p>Upload an image to optimize it if it's larger than 2MB.</p>
+
+    <input type="file" id="imageUpload" accept="image/*">
+    <p>Selected file: <span id="fileName">None</span></p>
+    <div id="feedback"></div>
+
+    <div class="image-preview" id="imagePreview"></div>
+
+    <script>
+        const imageUpload = document.getElementById('imageUpload');
+        const feedback = document.getElementById('feedback');
+        const imagePreview = document.getElementById('imagePreview');
+        const fileNameDisplay = document.getElementById('fileName');
+
+        let originalImage;
+        let originalSize;
+        let selectedContainer = null;
+
+        imageUpload.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            fileNameDisplay.textContent = file.name;
+            feedback.textContent = '';
+            imagePreview.innerHTML = '';
+            originalSize = file.size;
+
+            if (file.size > 2 * 1024 * 1024) {
+                feedback.textContent = 'Image is larger than 2MB. Generating optimization options...';
+                const reader = new FileReader();
+
+                reader.onload = async (e) => {
+                    originalImage = e.target.result;
+                    // Create original image preview
+                    await createImagePreview(originalImage, '100%', file.size);
+                    
+                    // Generate optimized versions targeting 75%, 50%, and 25%
+                    const targetSizes = [
+                        { percent: 75, quality: 0.75 },
+                        { percent: 50, quality: 0.5 },
+                        { percent: 25, quality: 0.25 }
+                    ];
+
+                    // Use binary search to achieve target file sizes
+                    for (const target of targetSizes) {
+                        await findOptimalQuality(target.percent);
+                    }
+                    
+                    feedback.textContent = 'Click on your preferred version to select it.';
+                };
+
+                reader.readAsDataURL(file);
+            } else {
+                feedback.textContent = 'Image size is acceptable, no optimization needed.';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    createImagePreview(e.target.result, '100%', file.size);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        async function findOptimalQuality(targetPercent) {
+            let minQuality = 0.01;
+            let maxQuality = 1.0;
+            let bestQuality = 0.5;
+            let bestSize = 0;
+            const targetSize = (originalSize * targetPercent) / 100;
+            const tolerance = targetSize * 0.1; // 10% tolerance
+
+            for (let i = 0; i < 8; i++) { // Maximum 8 iterations for binary search
+                const quality = (minQuality + maxQuality) / 2;
+                const size = await getOptimizedSize(quality);
+
+                if (Math.abs(size - targetSize) < tolerance) {
+                    bestQuality = quality;
+                    bestSize = size;
+                    break;
+                }
+
+                if (size > targetSize) {
+                    maxQuality = quality;
+                } else {
+                    minQuality = quality;
+                }
+                bestQuality = quality;
+                bestSize = size;
+            }
+
+            // Generate final image with best quality found
+            await optimizeImage(bestQuality, targetPercent);
+        }
+
+        async function getOptimizedSize(quality) {
+            return new Promise((resolve) => {
+                const canvas = document.createElement('canvas');
+                const img = new Image();
+                img.src = originalImage;
+
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    canvas.toBlob((blob) => {
+                        resolve(blob.size);
+                    }, 'image/jpeg', quality);
+                };
+            });
+        }
+
+        async function optimizeImage(quality, targetPercent) {
+            const canvas = document.createElement('canvas');
+            const img = document.createElement('img');
+            img.src = originalImage;
+
+            await new Promise((resolve) => {
+                img.onload = resolve;
+            });
+
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            canvas.toBlob(async (blob) => {
+                const optimizedImageUrl = URL.createObjectURL(blob);
+                const actualPercent = (blob.size / originalSize * 100).toFixed(1);
+                await createImagePreview(
+                    optimizedImageUrl, 
+                    `Target: ${targetPercent}% (Actual: ${actualPercent}%)`, 
+                    blob.size
+                );
+            }, 'image/jpeg', quality);
+        }
+
+        async function createImagePreview(imageUrl, label, size) {
+            const container = document.createElement('div');
+            container.className = 'image-container';
+            
+            const img = document.createElement('img');
+            img.src = imageUrl;
+            img.alt = label;
+
+            const sizeInfo = document.createElement('div');
+            sizeInfo.className = 'file-info';
+            sizeInfo.textContent = `${label} - ${formatSize(size)}`;
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = imageUrl;
+            downloadLink.download = `optimized-${label}.jpg`;
+            downloadLink.className = 'download-btn';
+            downloadLink.textContent = 'Download';
+
+            container.appendChild(img);
+            container.appendChild(sizeInfo);
+            container.appendChild(downloadLink);
+
+            container.addEventListener('click', (e) => {
+                if (e.target !== downloadLink) {
+                    if (selectedContainer) {
+                        selectedContainer.classList.remove('selected');
+                    }
+                    container.classList.add('selected');
+                    selectedContainer = container;
+                }
+            });
+
+            imagePreview.appendChild(container);
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+    </script>
+</body>
+</html>
